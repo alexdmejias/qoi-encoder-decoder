@@ -1,5 +1,6 @@
 import fs from "node:fs";
-import { encode, logNum } from "./lib.js";
+import { encode } from "./lib.js";
+import { logNum } from "./utils.js";
 
 async function main() {
     const args = [...process.argv];
@@ -17,7 +18,11 @@ async function main() {
         const correspondingQoi = fs.readFileSync(args[3].slice(0, -3) + "qoi");
         const result = await encode(args[3], correspondingQoi);
 
+        console.log("creating file...");
         fs.writeFileSync(args[4], result);
+
+        console.log("file created");
+        console.log("verifying file...");
 
         for (let i = 0; i < result.byteLength; i++) {
             const element = correspondingQoi[i];
@@ -39,6 +44,7 @@ async function main() {
                 break;
             }
         }
+        console.log("file verified");
     } else if (func === "decode") {
         throw new Error("TODO");
     } else {

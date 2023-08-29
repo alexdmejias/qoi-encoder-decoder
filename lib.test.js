@@ -1,9 +1,10 @@
 import { before, describe, it } from "node:test";
 import fs from "node:fs";
+import path from "node:path";
 import assert from "node:assert";
 
-import { getHeader, encode } from "./lib.js";
-import path from "node:path";
+import { encode } from "./lib.js";
+import { getHeader } from "./utils.js";
 
 const SAMPLE_IMAGES_DIR = "samples";
 
