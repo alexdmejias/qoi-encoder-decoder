@@ -159,14 +159,14 @@ function isNumInRange(num, floor, ceiling) {
     return num >= floor && num <= ceiling;
 }
 
-function write(buffer, offset, compareBuffer, ...items) {
+function write(state, compareBuffer, ...items) {
     items.forEach((item) => {
-        if (item !== compareBuffer[offset]) {
-            console.log("\n\nerror in write function\n\n#:", offset);
+        if (item !== compareBuffer[state.offset]) {
+            console.log("\n\nerror in write function\n\n#:", state.offset);
             console.table([
                 {
                     name: "old",
-                    ...logNum(compareBuffer[offset]),
+                    ...logNum(compareBuffer[state.offset]),
                 },
                 {
                     name: "new",
@@ -174,82 +174,102 @@ function write(buffer, offset, compareBuffer, ...items) {
                 },
             ]);
             console.log("\n\n");
-            // offset = buffer.writeUInt8(item, offset);
+            state.offset = state.buffer.writeUInt8(item, state.offset);
             // fs.writeFileSync("./output-incomplete.qoi", buffer);
-            throw new Error(`${item} !== ${compareBuffer[offset]}`);
+            throw new Error(`${item} !== ${compareBuffer[state.offset]}`);
         }
 
-        offset = buffer.writeUInt8(item, offset);
+        state.offset = state.buffer.writeUInt8(item, state.offset);
     });
 
-    return offset;
+    return state.offset;
+}
+
+function createQOIHeader({ width, height, channels, colorspace }) {
+    const buffer = Buffer.alloc(14);
+
+    let offset = buffer.write("qoif");
+    offset = buffer.writeInt32BE(width, offset);
+    offset = buffer.writeInt32BE(height, offset);
+    offset = buffer.writeInt8(channels, offset);
+
+    buffer.writeUInt8(colorspace, offset);
+
+    return buffer;
 }
 
 export async function encode(filePath, correspondingQoiBuffer) {
     const jimp = await Jimp.read(filePath);
     const { width, height } = jimp.bitmap;
-    const isRGBA = jimp.hasAlpha();
+    const channels = jimp.hasAlpha() ? 4 : 3;
+    // TODO
+    const colorspace = 0;
 
-    const channels = isRGBA ? 4 : 3;
-    const bufferSize = width * height * (channels + 1) + 14 + 8;
+    const headerBuffer = createQOIHeader({
+        width,
+        height,
+        channels,
+        colorspace,
+    });
 
-    const buf = Buffer.alloc(bufferSize);
+    const footerSeq = [0, 0, 0, 0, 0, 0, 0, 1];
 
-    let offset = buf.write("qoif");
-    offset = buf.writeInt32BE(width, offset);
-    offset = buf.writeInt32BE(height, offset);
+    // represents the max possible size of the buffer based on the worst case scenario, the returned buffer will be smaller
+    const bufferSize =
+        width * height * channels +
+        headerBuffer.length +
+        colorspace +
+        footerSeq.length;
 
-    offset = write(buf, offset, correspondingQoiBuffer, channels, 0);
-
+    const state = {
+        offset: headerBuffer.length,
+        buffer: Buffer.concat([headerBuffer], bufferSize),
+    };
     const pixels = Array.from({ length: 64 }).fill({ r: 0, g: 0, b: 0, a: 0 });
+
+    const write8 = (...items) => {
+        return write(state, correspondingQoiBuffer, ...items);
+    };
+
+    const finalizeRun = () => {
+        const result = LABEL_QOI_OP_RUN | (run - 1);
+
+        write8(result);
+        run = 0;
+    };
+
     let prevPixel = {
         r: 0,
         g: 0,
         b: 0,
         a: 255,
     };
-
     let run = 0;
 
-    for (const { x, y, idx } of jimp.scanIterator(
+    for (const { idx } of jimp.scanIterator(
         0,
         0,
         jimp.bitmap.width,
         jimp.bitmap.height
     )) {
-        const r = jimp.bitmap.data[idx + 0];
-        const g = jimp.bitmap.data[idx + 1];
-        const b = jimp.bitmap.data[idx + 2];
-        const a = jimp.bitmap.data[idx + 3];
-
+        const [r, g, b, a = 0] = jimp.bitmap.data.slice(idx, idx + 4);
         const currPixel = { r, g, b, a };
         const prevIsCurr = compareColors(currPixel, prevPixel);
 
         if (prevIsCurr) {
             run++;
             if (run === 62) {
-                const result = LABEL_QOI_OP_RUN | (run - 1);
-
-                offset = write(buf, offset, correspondingQoiBuffer, result);
-                run = 0;
+                finalizeRun();
             }
         } else {
             if (run > 0) {
-                const result = LABEL_QOI_OP_RUN | (run - 1);
-
-                offset = write(buf, offset, correspondingQoiBuffer, result);
-                run = 0;
+                finalizeRun();
             }
 
             const hash = getHash(r, g, b, a);
 
             if (compareColors(currPixel, pixels[hash])) {
-                offset = write(
-                    buf,
-                    offset,
-                    correspondingQoiBuffer,
-                    LABEL_QOI_OP_INDEX | hash
-                );
+                write8(LABEL_QOI_OP_INDEX | hash);
             } else {
                 pixels[hash] = currPixel;
 
@@ -268,46 +288,21 @@ export async function encode(filePath, correspondingQoiBuffer) {
                             ((diff.r + 2) << 4) |
                             ((diff.g + 2) << 2) |
                             ((diff.b + 2) << 0);
-                        offset = write(
-                            buf,
-                            offset,
-                            correspondingQoiBuffer,
-                            result
-                        );
+                        write8(result);
                     } else if (
                         isNumInRange(diff.g, -32, 31) &&
                         isNumInRange(drDg, -8, 7) &&
                         isNumInRange(dbDg, -8, 7)
                     ) {
-                        offset = write(
-                            buf,
-                            offset,
-                            correspondingQoiBuffer,
+                        write8(
                             LABEL_QOI_OP_LUMA | (diff.g + 32),
                             ((drDg + 8) << 4) | (dbDg + 8)
                         );
                     } else {
-                        offset = write(
-                            buf,
-                            offset,
-                            correspondingQoiBuffer,
-                            LABEL_QOI_OP_RGB,
-                            r,
-                            g,
-                            b
-                        );
+                        write8(LABEL_QOI_OP_RGB, r, g, b);
                     }
                 } else {
-                    offset = write(
-                        buf,
-                        offset,
-                        correspondingQoiBuffer,
-                        LABEL_QOI_OP_RGBA,
-                        r,
-                        g,
-                        b,
-                        a
-                    );
+                    write8(LABEL_QOI_OP_RGBA, r, g, b, a);
                 }
             }
         }
@@ -317,13 +312,11 @@ export async function encode(filePath, correspondingQoiBuffer) {
 
     // finalize the last potential run
     if (run !== 0) {
-        const result = LABEL_QOI_OP_RUN | (run - 1);
-
-        offset = write(buf, offset, correspondingQoiBuffer, result);
-        run = 0;
+        finalizeRun();
     }
 
-    offset = write(buf, offset, correspondingQoiBuffer, 0, 0, 0, 0, 0, 0, 0, 1);
+    write8(...footerSeq);
 
-    return buf.slice(0, offset);
+    // only return the buffer that is occupied
+    return state.buffer.slice(0, state.offset);
 }
