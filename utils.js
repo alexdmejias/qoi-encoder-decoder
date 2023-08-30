@@ -93,24 +93,28 @@ export function isNumInRange(num, floor, ceiling) {
     return num >= floor && num <= ceiling;
 }
 
-export function write(state, compareBuffer, ...items) {
+export function write({ state, compareBuffer, earlyExit, logDiff }, ...items) {
     items.forEach((item) => {
         if (item !== compareBuffer[state.offset]) {
-            console.log("\n\nerror in write function\n\n#:", state.offset);
-            console.table([
-                {
-                    name: "old",
-                    ...logNum(compareBuffer[state.offset]),
-                },
-                {
-                    name: "new",
-                    ...logNum(item),
-                },
-            ]);
-            console.log("\n\n");
-            state.offset = state.buffer.writeUInt8(item, state.offset);
-            fs.writeFileSync("./output-incomplete.qoi", state.buffer);
-            throw new Error(`${item} !== ${compareBuffer[state.offset]}`);
+            if (logDiff) {
+                console.log("\n\nerror in write function\n\n#:", state.offset);
+                console.table([
+                    {
+                        name: "old",
+                        ...logNum(compareBuffer[state.offset]),
+                    },
+                    {
+                        name: "new",
+                        ...logNum(item),
+                    },
+                ]);
+                console.log("\n\n");
+                state.offset = state.buffer.writeUInt8(item, state.offset);
+                fs.writeFileSync("./output-incomplete.qoi", state.buffer);
+            }
+            if (earlyExit) {
+                throw new Error(`${item} !== ${compareBuffer[state.offset]}`);
+            }
         }
 
         state.offset = state.buffer.writeUInt8(item, state.offset);

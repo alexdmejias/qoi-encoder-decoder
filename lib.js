@@ -18,7 +18,12 @@ import {
     LABEL_QOI_OP_RUN,
 } from "./constants.js";
 
-export async function encode(filePath, correspondingQoiBuffer) {
+export async function encode({
+    filePath,
+    earlyExit = false,
+    logDiff = false,
+    correspondingQoiBuffer,
+}) {
     const jimp = await Jimp.read(filePath);
     const { width, height } = jimp.bitmap;
     const channels = jimp.hasAlpha() ? 4 : 3;
@@ -48,7 +53,15 @@ export async function encode(filePath, correspondingQoiBuffer) {
     const pixels = Array.from({ length: 64 }).fill({ r: 0, g: 0, b: 0, a: 0 });
 
     const write8 = (...items) => {
-        return write(state, correspondingQoiBuffer, ...items);
+        return write(
+            {
+                state,
+                compareBuffer: correspondingQoiBuffer,
+                earlyExit,
+                logDiff,
+            },
+            ...items
+        );
     };
 
     const finalizeRun = () => {
@@ -93,11 +106,10 @@ export async function encode(filePath, correspondingQoiBuffer) {
             } else {
                 pixels[hash] = currPixel;
 
-                const diff = getColorDiff(currPixel, prevPixel);
-                const drDg = diff.r - diff.g;
-                const dbDg = diff.b - diff.g;
-
-                if (diff.a === 0) {
+                if (currPixel.a === prevPixel.a) {
+                    const diff = getColorDiff(currPixel, prevPixel);
+                    const vgr = diff.r - diff.g;
+                    const vgb = diff.b - diff.g;
                     if (
                         isNumInRange(diff.r, -2, 1) &&
                         isNumInRange(diff.g, -2, 1) &&
@@ -111,12 +123,12 @@ export async function encode(filePath, correspondingQoiBuffer) {
                         write8(result);
                     } else if (
                         isNumInRange(diff.g, -32, 31) &&
-                        isNumInRange(drDg, -8, 7) &&
-                        isNumInRange(dbDg, -8, 7)
+                        isNumInRange(vgr, -8, 7) &&
+                        isNumInRange(vgb, -8, 7)
                     ) {
                         write8(
                             LABEL_QOI_OP_LUMA | (diff.g + 32),
-                            ((drDg + 8) << 4) | (dbDg + 8)
+                            ((vgr + 8) << 4) | (vgb + 8)
                         );
                     } else {
                         write8(LABEL_QOI_OP_RGB, r, g, b);

@@ -16,7 +16,10 @@ async function main() {
     const func = args[2];
     if (func === "encode") {
         const correspondingQoi = fs.readFileSync(args[3].slice(0, -3) + "qoi");
-        const result = await encode(args[3], correspondingQoi);
+        const result = await encode({
+            filePath: args[3],
+            correspondingQoiBuffer: correspondingQoi,
+        });
 
         console.log("creating file...");
         fs.writeFileSync(args[4], result);

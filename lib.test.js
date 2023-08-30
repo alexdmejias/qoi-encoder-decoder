@@ -56,17 +56,24 @@ describe("encode", () => {
 
     describe("compare files ", async () => {
         it("all qoi files should match with the encode output", async () => {
-            qoiFiles.forEach(async (qoiFileName) => {
+            for (const qoiFileName of qoiFiles) {
                 const qoiFile = fs.readFileSync(qoiFileName);
                 const correspondingPNG = `${qoiFileName.slice(0, -4)}.png`;
-                const encodeResult = await encode(correspondingPNG, qoiFile);
+
+                const encodeResult = await encode({
+                    correspondingQoiBuffer: qoiFile,
+                    filePath: correspondingPNG,
+                    earlyExit: false,
+                    logDiff: false,
+                });
+
                 const comparisonResult = qoiFile.compare(encodeResult);
 
                 assert(
                     comparisonResult === 0,
-                    `file: ${qoiFileName} is not equal to it's encode output not equal`
+                    `file: ${qoiFileName} is not equal to its encode output`
                 );
-            });
+            }
         });
     });
 });
